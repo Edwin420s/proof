@@ -1,109 +1,219 @@
 import { useState, useCallback } from 'react'
-import { mockContract } from '../utils/ethersUtils'
+import { mockContract } from '../utils/ethersUtils.js'
 
-export const useDID = () => {
+const useDID = (walletAddress) => {
   const [did, setDid] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const createDID = useCallback(async (walletAddress) => {
-    if (!walletAddress) throw new Error('Wallet address required')
-
-    setLoading(true)
-    setError(null)
-
-    try {
-      // Simulate DID creation
-      await new Promise(resolve => setTimeout(resolve, 800))
-
-      const newDID = `did:polygon:${walletAddress}`
-      setDid(newDID)
-
-      return newDID
-    } catch (err) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
+  // Generate a DID for a wallet address
+  const generateDID = useCallback(async () => {
+    if (!walletAddress) {
+      setError('Wallet address is required')
+      return null
     }
-  }, [])
 
-  const resolveDID = useCallback(async (didString) => {
-    setLoading(true)
+    setIsLoading(true)
     setError(null)
 
     try {
-      // Simulate DID resolution
-      await new Promise(resolve => setTimeout(resolve, 600))
+      // In production, this would use Polygon ID SDK or similar
+      // For demo, we'll generate a simple DID
+      const generatedDID = `did:polygon:${walletAddress.toLowerCase()}`
 
-      // Mock DID document
-      return {
-        did: didString,
-        document: {
-          '@context': 'https://www.w3.org/ns/did/v1',
-          id: didString,
-          verificationMethod: [{
-            id: `${didString}#keys-1`,
-            type: 'EcdsaSecp256k1VerificationKey2019',
-            controller: didString,
-            publicKeyHex: `0x${Math.random().toString(16).substr(2, 64)}`
-          }],
-          authentication: [`${didString}#keys-1`]
-        }
-      }
+      // Store the DID mapping (in production, this would be on-chain)
+      localStorage.setItem(`did_${walletAddress}`, generatedDID)
+      
+      setDid(generatedDID)
+      setIsLoading(false)
+      return generatedDID
     } catch (err) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
+      console.error('Error generating DID:', err)
+      setError(err.message || 'Failed to generate DID')
+      setIsLoading(false)
+      return null
     }
-  }, [])
+  }, [walletAddress])
 
-  const verifyDID = useCallback(async (didString, proof) => {
-    setLoading(true)
+  // Resolve a DID to get document
+  const resolveDID = useCallback(async (didToResolve) => {
+    if (!didToResolve) {
+      setError('DID is required')
+      return null
+    }
+
+    setIsLoading(true)
     setError(null)
 
     try {
-      // Simulate DID verification
+      // Simulate DID resolution delay
       await new Promise(resolve => setTimeout(resolve, 500))
 
-      const isValid = didString === did && proof // Simple validation for demo
-      return { isValid }
+      // Mock DID document
+      const didDocument = {
+        '@context': [
+          'https://www.w3.org/ns/did/v1',
+          'https://w3id.org/security/suites/ed25519-2020/v1'
+        ],
+        id: didToResolve,
+        verificationMethod: [
+          {
+            id: `${didToResolve}#keys-1`,
+            type: 'Ed25519VerificationKey2020',
+            controller: didToResolve,
+            publicKeyMultibase: 'z' + Math.random().toString(36).substr(2, 44)
+          }
+        ],
+        authentication: [`${didToResolve}#keys-1`],
+        assertionMethod: [`${didToResolve}#keys-1`]
+      }
+
+      setIsLoading(false)
+      return didDocument
     } catch (err) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
+      console.error('Error resolving DID:', err)
+      setError(err.message || 'Failed to resolve DID')
+      setIsLoading(false)
+      return null
     }
-  }, [did])
+  }, [])
 
-  const updateDID = useCallback(async (updates) => {
-    if (!did) throw new Error('DID not created')
+  // Verify a DID (check if it's valid)
+  const verifyDID = useCallback(async (didToVerify) => {
+    if (!didToVerify) {
+      return { isValid: false, error: 'DID is required' }
+    }
 
-    setLoading(true)
+    setIsLoading(true)
     setError(null)
 
     try {
-      // Simulate DID update
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Check if DID format is valid
+      const isValidFormat = didToVerify.startsWith('did:polygon:0x') && didToVerify.length > 30
+      
+      // Check if DID exists (simulated)
+      const exists = localStorage.getItem(`did_${didToVerify.split(':')[2]}`) !== null
 
-      // In a real scenario, this would update the DID document on the blockchain
-      return { success: true, did }
+      // Simulate verification delay
+      await new Promise(resolve => setTimeout(resolve, 300))
+
+      const result = {
+        isValid: isValidFormat && exists,
+        did: didToVerify,
+        timestamp: new Date().toISOString()
+      }
+
+      setIsLoading(false)
+      return result
     } catch (err) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
+      console.error('Error verifying DID:', err)
+      setError(err.message || 'Failed to verify DID')
+      setIsLoading(false)
+      return { isValid: false, error: err.message }
+    }
+  }, [])
+
+  // Create a verifiable presentation
+  const createVerifiablePresentation = useCallback(async (credentials, options = {}) => {
+    if (!credentials || credentials.length === 0) {
+      setError('No credentials provided')
+      return null
+    }
+
+    if (!did) {
+      setError('DID not initialized')
+      return null
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      // Generate a verifiable presentation
+      const presentation = {
+        '@context': [
+          'https://www.w3.org/2018/credentials/v1',
+          'https://www.w3.org/2018/credentials/examples/v1'
+        ],
+        type: ['VerifiablePresentation'],
+        holder: did,
+        verifiableCredential: credentials,
+        proof: {
+          type: 'Ed25519Signature2020',
+          created: new Date().toISOString(),
+          verificationMethod: `${did}#keys-1`,
+          proofPurpose: 'authentication',
+          challenge: options.challenge || 'proof-challenge-' + Date.now(),
+          domain: options.domain || 'proof.io'
+        }
+      }
+
+      // Simulate signing delay
+      await new Promise(resolve => setTimeout(resolve, 800))
+
+      setIsLoading(false)
+      return presentation
+    } catch (err) {
+      console.error('Error creating presentation:', err)
+      setError(err.message || 'Failed to create verifiable presentation')
+      setIsLoading(false)
+      return null
     }
   }, [did])
+
+  // Check if a DID is trusted (issued by trusted issuer)
+  const isTrustedDID = useCallback(async (didToCheck) => {
+    if (!didToCheck) {
+      return false
+    }
+
+    try {
+      // Extract address from DID
+      const address = didToCheck.split(':')[2]
+      if (!address) return false
+
+      // Check against issuer registry (mock)
+      const isTrusted = await mockContract.isTrustedIssuer(address)
+      return isTrusted
+    } catch (err) {
+      console.error('Error checking trusted DID:', err)
+      return false
+    }
+  }, [])
+
+  // Load existing DID for current wallet
+  const loadDID = useCallback(() => {
+    if (!walletAddress) return null
+
+    const storedDID = localStorage.getItem(`did_${walletAddress}`)
+    if (storedDID) {
+      setDid(storedDID)
+      return storedDID
+    }
+    return null
+  }, [walletAddress])
+
+  // Clear/reset DID
+  const clearDID = () => {
+    setDid(null)
+    setError(null)
+    if (walletAddress) {
+      localStorage.removeItem(`did_${walletAddress}`)
+    }
+  }
 
   return {
     did,
-    loading,
+    isLoading,
     error,
-    createDID,
+    generateDID,
     resolveDID,
     verifyDID,
-    updateDID
+    createVerifiablePresentation,
+    isTrustedDID,
+    loadDID,
+    clearDID
   }
 }
+
+export default useDID
