@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: proof-postgres
+    environment:
+      POSTGRES_DB: proof_db
+      POSTGRES_USER: proof_user
+      POSTGRES_PASSWORD: proof_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - proof-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proof_user -d proof_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: proof-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - proof-network
+    command: redis-server --appendonly yes
+
+  # IPFS Node
+  ipfs:
+    image: ipfs/kubo:latest
+    container_name: proof-ipfs
+    ports:
+      - "4001:4001" # P2P
+      - "5001:5001" # API
+      - "8080:8080" # Gateway
+    volumes:
+      - ipfs_data:/data/ipfs
+    networks:
+      - proof-network
+    healthcheck:
+      test: ["CMD", "ipfs", "stats", "bw"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: proof-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      ipfs:
+        condition: service_started
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://proof_user:proof_password@postgres:5432/proof_db
+      - REDIS_URL=redis://redis:6379
+      - IPFS_API_URL=http://ipfs:5001
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    networks:
+      - proof-network
+    restart: unless-stopped
+
+  # Frontend (if included)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: proof-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - proof-network
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
+      - REACT_APP_BLOCKCHAIN_NETWORK=mumbai
+    restart: unless-stopped
+
+  # Hardhat local node (for development)
+  hardhat:
+    image: node:18-alpine
+    container_name: proof-hardhat
+    working_dir: /app
+    volumes:
+      - ./contracts:/app
+    ports:
+      - "8545:8545"
+    networks:
+      - proof-network
+    command: >
+      sh -c "
+      npm install &&
+      npx hardhat node --hostname 0.0.0.0 --port 8545
+      "
+
+  # Prisma Studio (database GUI)
+  prisma-studio:
+    image: node:18-alpine
+    container_name: proof-prisma-studio
+    working_dir: /app
+    depends_on:
+      - postgres
+    volumes:
+      - ./backend:/app
+    ports:
+      - "5555:5555"
+    networks:
+      - proof-network
+    command: >
+      sh -c "
+      cd /app &&
+      npx prisma studio --port 5555 --browser none
+      "
+
+volumes:
+  postgres_data:
+  redis_data:
+  ipfs_data:
+
+networks:
+  proof-network:
+    driver: bridge
