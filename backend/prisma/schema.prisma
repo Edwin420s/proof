@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String    @id @default(cuid())
+  walletAddress   String    @unique
+  did             String?   @unique
+  email           String?   @unique
+  name            String?
+  role            Role      @default(USER)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  credentials     Credential[]
+  verifications   Verification[]
+  
+  @@index([walletAddress])
+  @@index([did])
+}
+
+model Issuer {
+  id              String    @id @default(cuid())
+  name            String
+  description     String?
+  walletAddress   String    @unique
+  did             String    @unique
+  isVerified      Boolean   @default(false)
+  contractAddress String?
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  credentials     Credential[]
+  
+  @@index([walletAddress])
+  @@index([did])
+  @@index([isVerified])
+}
+
+model Credential {
+  id              String    @id @default(cuid())
+  userId          String
+  issuerId        String
+  type            String    // e.g., "EDUCATION_DEGREE", "AGE_VERIFICATION"
+  title           String
+  description     String?
+  
+  // On-chain data
+  credentialHash  String    @unique
+  contractAddress String?
+  tokenId         String?
+  chainId         Int       @default(137) // Polygon Mainnet
+  
+  // Credential data (encrypted/private)
+  data            Json?
+  metadata        Json?
+  
+  // Status
+  status          CredentialStatus @default(ACTIVE)
+  issuedAt        DateTime  @default(now())
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  revokedReason   String?
+  
+  // Relationships
+  user            User      @relation(fields: [userId], references: [id])
+  issuer          Issuer    @relation(fields: [issuerId], references: [id])
+  verifications   Verification[]
+  
+  @@index([userId])
+  @@index([issuerId])
+  @@index([credentialHash])
+  @@index([status])
+  @@index([issuedAt])
+}
+
+model Verification {
+  id              String    @id @default(cuid())
+  credentialId    String
+  verifierId      String
+  proofHash       String    @unique
+  proofData       Json?
+  
+  // Verification result
+  status          VerificationStatus @default(PENDING)
+  verifiedAt      DateTime?
+  verificationResult Json?
+  
+  // Metadata
+  ipAddress       String?
+  userAgent       String?
+  reason          String?
+  
+  createdAt       DateTime  @default(now())
+  
+  // Relationships
+  credential      Credential @relation(fields: [credentialId], references: [id])
+  verifier        User      @relation(fields: [verifierId], references: [id])
+  
+  @@index([credentialId])
+  @@index([verifierId])
+  @@index([proofHash])
+  @@index([status])
+}
+
+enum Role {
+  USER
+  ISSUER
+  ADMIN
+  VERIFIER
+}
+
+enum CredentialStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  REVOKED
+  SUSPENDED
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
