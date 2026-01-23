@@ -1,9 +1,9 @@
 const { ethers } = require('ethers');
-const { 
-  POLYGON_RPC_URL, 
+const {
+  POLYGON_RPC_URL,
   CONTRACT_ADDRESS,
   ADMIN_WALLET_PRIVATE_KEY,
-  ADMIN_WALLET_ADDRESS 
+  ADMIN_WALLET_ADDRESS
 } = require('../config/database');
 
 class BlockchainService {
@@ -19,10 +19,43 @@ class BlockchainService {
     if (this.initialized) return;
 
     try {
-      // Load contract ABIs
-      const IssuerRegistryABI = require('../../contracts/artifacts/contracts/IssuerRegistry.sol/IssuerRegistry.json').abi;
-      const CredentialRegistryABI = require('../../contracts/artifacts/contracts/CredentialRegistry.sol/CredentialRegistry.json').abi;
-      const DIDRegistryABI = require('../../contracts/artifacts/contracts/DIDRegistry.sol/DIDRegistry.json').abi;
+      // Load contract ABIs with proper error handling
+      let IssuerRegistryABI, CredentialRegistryABI, DIDRegistryABI;
+
+      try {
+        // Try to load from compiled artifacts (production path)
+        const path = require('path');
+        const fs = require('fs');
+        const contractsRoot = path.resolve(__dirname, '../../../contracts');
+
+        const issuerPath = path.join(contractsRoot, 'artifacts/contracts/IssuerRegistry.sol/IssuerRegistry.json');
+        const credPath = path.join(contractsRoot, 'artifacts/contracts/CredentialRegistry.sol/CredentialRegistry.json');
+        const didPath = path.join(contractsRoot, 'artifacts/contracts/DIDRegistry.sol/DIDRegistry.json');
+
+        if (!fs.existsSync(issuerPath)) {
+          throw new Error(`Contract artifacts not found. Please run 'cd contracts && npm run compile' first.`);
+        }
+
+        IssuerRegistryABI = require(issuerPath).abi;
+        CredentialRegistryABI = require(credPath).abi;
+        DIDRegistryABI = require(didPath).abi;
+
+      } catch (loadError) {
+        console.error('❌ Failed to load contract ABIs:', loadError.message);
+        console.log('💡 Make sure contracts are compiled: cd contracts && npm run compile');
+        throw new Error('Contract ABIs not found. Compile contracts first.');
+      }
+
+      // Verify contract addresses are set
+      if (!process.env.ISSUER_REGISTRY_ADDRESS) {
+        console.warn('⚠️  ISSUER_REGISTRY_ADDRESS not set in environment');
+      }
+      if (!process.env.CREDENTIAL_REGISTRY_ADDRESS) {
+        console.warn('⚠️  CREDENTIAL_REGISTRY_ADDRESS not set in environment');
+      }
+      if (!process.env.DID_REGISTRY_ADDRESS) {
+        console.warn('⚠️  DID_REGISTRY_ADDRESS not set in environment');
+      }
 
       // Create contract instances
       this.contracts.issuerRegistry = new ethers.Contract(
@@ -44,9 +77,14 @@ class BlockchainService {
       );
 
       this.initialized = true;
-      console.log('✅ Blockchain service initialized');
+      console.log('✅ Blockchain service initialized successfully');
+      console.log('📍 Issuer Registry:', this.contracts.issuerRegistry.target);
+      console.log('📍 Credential Registry:', this.contracts.credentialRegistry.target);
+      console.log('📍 DID Registry:', this.contracts.didRegistry.target);
+
     } catch (error) {
-      console.error('❌ Blockchain service initialization failed:', error);
+      console.error('❌ Blockchain service initialization failed:', error.message);
+      console.error('Stack:', error.stack);
       throw error;
     }
   }
@@ -67,7 +105,7 @@ class BlockchainService {
       );
 
       const receipt = await tx.wait();
-      
+
       console.log(`✅ Issuer registered. Tx hash: ${receipt.hash}`);
 
       return {
@@ -146,7 +184,7 @@ class BlockchainService {
       const receipt = await tx.wait();
 
       // Parse events to get credential hash
-      const event = receipt.logs.find(log => 
+      const event = receipt.logs.find(log =>
         log.fragment?.name === 'CredentialIssued'
       );
 
@@ -233,7 +271,7 @@ class BlockchainService {
       const receipt = await tx.wait();
 
       // Check if verification was successful
-      const event = receipt.logs.find(log => 
+      const event = receipt.logs.find(log =>
         log.fragment?.name === 'ProofVerified'
       );
 
@@ -280,7 +318,7 @@ class BlockchainService {
         revoked,
         expired,
         issuedAt: new Date(Number(issuedAt) * 1000).toISOString(),
-        expiresAt: expiresAt > 0 
+        expiresAt: expiresAt > 0
           ? new Date(Number(expiresAt) * 1000).toISOString()
           : null,
         checkedAt: new Date().toISOString()
@@ -360,11 +398,11 @@ class BlockchainService {
         issuer,
         credentialType,
         issuedAt: new Date(Number(issuedAt) * 1000).toISOString(),
-        expiresAt: expiresAt > 0 
+        expiresAt: expiresAt > 0
           ? new Date(Number(expiresAt) * 1000).toISOString()
           : null,
         revoked,
-        revokedAt: revokedAt > 0 
+        revokedAt: revokedAt > 0
           ? new Date(Number(revokedAt) * 1000).toISOString()
           : null,
         revocationReason,
@@ -399,7 +437,7 @@ class BlockchainService {
         did,
         isVerified,
         registeredAt: new Date(Number(registeredAt) * 1000).toISOString(),
-        verifiedAt: verifiedAt > 0 
+        verifiedAt: verifiedAt > 0
           ? new Date(Number(verifiedAt) * 1000).toISOString()
           : null,
         metadataURI,
@@ -453,7 +491,7 @@ class BlockchainService {
         walletAddress: issuer.walletAddress,
         isVerified: issuer.isVerified,
         registeredAt: new Date(Number(issuer.registeredAt) * 1000).toISOString(),
-        verifiedAt: issuer.verifiedAt > 0 
+        verifiedAt: issuer.verifiedAt > 0
           ? new Date(Number(issuer.verifiedAt) * 1000).toISOString()
           : null,
         metadataURI: issuer.metadataURI
@@ -559,7 +597,7 @@ class BlockchainService {
 
     try {
       const gasEstimate = await contractMethod.estimateGas(...args);
-      
+
       return {
         success: true,
         gasEstimate: Number(gasEstimate),
@@ -581,7 +619,7 @@ class BlockchainService {
     try {
       const feeData = await this.provider.getFeeData();
       const gasPrice = feeData.gasPrice || feeData.maxFeePerGas || ethers.parseUnits('30', 'gwei');
-      
+
       const cost = gasEstimate * gasPrice;
       const costInETH = ethers.formatEther(cost);
       const costInUSD = await this.convertETHtoUSD(costInETH);
@@ -609,7 +647,7 @@ class BlockchainService {
       // Mock conversion rate - in production, use CoinGecko or similar API
       const ethToUSD = 2500; // Mock rate
       const usdValue = parseFloat(ethAmount) * ethToUSD;
-      
+
       return `$${usdValue.toFixed(2)}`;
     } catch (error) {
       return 'N/A';
@@ -636,14 +674,14 @@ class BlockchainService {
       }
 
       eventFilter = contract.filters[eventName]();
-      
+
       contract.on(eventFilter, (...args) => {
         const event = args[args.length - 1]; // Last argument is the event object
         callback(event);
       });
 
       console.log(`✅ Listening to ${eventName} events`);
-      
+
       return {
         success: true,
         eventName,
@@ -675,9 +713,9 @@ class BlockchainService {
       }
 
       contract.removeAllListeners(eventName);
-      
+
       console.log(`✅ Stopped listening to ${eventName} events`);
-      
+
       return {
         success: true,
         eventName,
